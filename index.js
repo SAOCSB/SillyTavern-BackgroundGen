@@ -21,7 +21,7 @@ import { power_user } from '../../../power-user.js';
 import EventSourceStream from '../../../sse-stream.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
 
-const VERSION = '1.0.1';
+const VERSION = '1.0.2';
 const LOG = '[BG]';
 const MODULE = 'bgGen';
 const API = '/api/plugins/bg-gen';
@@ -319,6 +319,7 @@ class RelayJob {
         this.head = null;
         this.everConnected = false;
         this.accepted = false;
+        this.statusFailures = 0;
         this.lastDataAt = Date.now();
         this.watchdog = null;
         this.unloadTimer = null;
@@ -420,8 +421,10 @@ class RelayJob {
                 // 一直没连上：服务器已经收到任务时（非流式请求超过 Cloudflare 的 100 秒、手机切后台断网等）继续等，否则按网络错误处理
                 const status = await this.fetchStatus();
                 if (this.state === 'stopped' || this.state === 'detached') throw abortError();
-                if (status && status.state !== 'gone') this.accepted = true;
-                else throw new TypeError('Failed to fetch');
+                if (status?.state === 'gone') throw new TypeError('Failed to fetch');
+                if (status) this.accepted = true;
+                // 查询本身失败（网络还没恢复）：还不能下结论，多试几次再放弃。按次数而不是时间算，手机锁屏时计时器不走
+                else if (++this.statusFailures >= 15) throw new TypeError('Failed to fetch');
             }
             if ((!initial || this.accepted) && Date.now() - this.lastDataAt > 30 * 60_000) throw fatal('网络长时间不可用。回复会在服务器上继续生成，回来后打开聊天即可看到。');
             await wake(Math.min(500 * 2 ** attempt, 8000));
